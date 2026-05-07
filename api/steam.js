@@ -31,7 +31,11 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600');
     res.status(200).send(renderSvg(title, games, type));
   } catch (err) {
-    res.status(500).send(`Error: ${err.message}`);
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.status(200).send(`<svg xmlns="http://www.w3.org/2000/svg" width="495" height="60">
+    <rect width="495" height="60" fill="#1c1917" rx="6"/>
+    <text x="25" y="35" fill="#0891b2" font-family="sans-serif" font-size="13">Steam stats error: ${esc(err.message)}</text>
+  </svg>`);
   }
 }
 
