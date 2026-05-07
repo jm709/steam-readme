@@ -16,7 +16,7 @@ export default async function handler(req, res) {
         minutes: g.playtime_2weeks,
         appid: g.appid,
       }));
-      title = '🎮 Recently Played (last 2 weeks)';
+      title = 'Recently Played (last 2 weeks)';
     } else {
       const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${apiKey}&steamid=${steamid}&include_appinfo=1&include_played_free_games=1`;
       const data = await (await fetch(url)).json();
@@ -24,10 +24,10 @@ export default async function handler(req, res) {
         .sort((a, b) => b.playtime_forever - a.playtime_forever)
         .slice(0, count)
         .map(g => ({ name: g.name, minutes: g.playtime_forever, appid: g.appid }));
-      title = '🏆 Most Played';
+      title = 'Most Played';
     }
 
-    // Fetch cover art in parallel and inline as base64 data URIs
+    // Fetch thumbnails in parallel with a per-image timeout. Failures fall through silently.
     const thumbs = await Promise.all(games.map(g => fetchThumb(g.appid)));
     games.forEach((g, i) => { g.thumb = thumbs[i]; });
 
@@ -46,13 +46,21 @@ export default async function handler(req, res) {
 const esc = s => String(s).replace(/[<>&'"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;'}[c]));
 
 async function fetchThumb(appid) {
+  if (!appid) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3000);
   try {
-    const r = await fetch(`https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/capsule_184x69.jpg`);
+    const r = await fetch(
+      `https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/capsule_184x69.jpg`,
+      { signal: ctrl.signal }
+    );
     if (!r.ok) return null;
     const b64 = Buffer.from(await r.arrayBuffer()).toString('base64');
     return `data:image/jpeg;base64,${b64}`;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -71,9 +79,10 @@ function renderSvg(title, games, type) {
       ? `${(g.minutes / 60).toFixed(1)}h`
       : `${Math.round(g.minutes / 60)}h`;
     const thumb = g.thumb
-      ? `<defs><clipPath id="thumbClip${i}"><rect x="${pad}" y="${thumbY}" width="${thumbW}" height="${thumbH}" rx="4"/></clipPath></defs>
-         <image href="${g.thumb}" x="${pad}" y="${thumbY}" width="${thumbW}" height="${thumbH}" preserveAspectRatio="xMidYMid slice" clip-path="url(#thumbClip${i})"/>`
-      : '';
+      ? `<g transform="translate(${pad}, ${thumbY})" clip-path="url(#thumbClip)">
+           <image href="${g.thumb}" width="${thumbW}" height="${thumbH}" preserveAspectRatio="xMidYMid slice"/>
+         </g>`
+      : `<rect x="${pad}" y="${thumbY}" width="${thumbW}" height="${thumbH}" fill="#292524" rx="4"/>`;
     return `
       ${thumb}
       <text x="${pad + thumbW + 15}" y="${textY}" fill="#ffffff" font-family="Segoe UI, Ubuntu, sans-serif" font-size="13">${esc(g.name).slice(0, 22)}</text>
@@ -82,6 +91,11 @@ function renderSvg(title, games, type) {
   }).join('');
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+    <defs>
+      <clipPath id="thumbClip">
+        <rect width="${thumbW}" height="${thumbH}" rx="4"/>
+      </clipPath>
+    </defs>
     <rect width="${width}" height="${height}" fill="#1c1917" rx="6"/>
     <text x="${pad}" y="32" fill="#0891b2" font-family="Segoe UI, Ubuntu, sans-serif" font-size="16" font-weight="bold">${title}</text>
     ${rows}
